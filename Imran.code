@@ -1,0 +1,13 @@
+	Add Song
+Create a new song node
+Input song id, title, author and duration
+If playlist is empty then
+    first = new node
+    last = new node
+    last.next = first
+Else
+    last.next = new node
+    last = new node
+    last.next = first
+End if
+Display "Song added successfully"
