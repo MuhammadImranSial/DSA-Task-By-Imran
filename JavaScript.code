@@ -1,0 +1,325 @@
+console.log('Lets write JavaScript');
+
+let currentSong = new Audio();
+let songs = [];
+let currFolder = "";
+let isShuffle = false;
+let currentIndex = 0;
+
+// Global DOM References (Jab DOM load hoga tab milenge)
+let play;
+let previous;
+let next;
+let libraryShuffleBtn; // 👈 Updated: Library Shuffle Button ka reference
+let seekbar;
+let circle;
+let isDragging = false;
+
+// UI helpers (search + theme)
+function applySearchFilter() {
+    const input = document.querySelector('#searchInput');
+    if (!input) return;
+    const query = input.value.trim().toLowerCase();
+    const items = document.querySelectorAll('.songlist ul li');
+    items.forEach(li => {
+        const text = li.innerText.toLowerCase();
+        li.style.display = query === '' ? '' : (text.indexOf(query) !== -1 ? '' : 'none');
+    });
+}
+
+function setTheme(isLight) {
+    if (isLight) document.body.classList.add('light');
+    else document.body.classList.remove('light');
+    localStorage.setItem('theme', isLight ? 'light' : 'dark');
+}
+
+// Utility function to convert seconds to MM:SS format
+function secondsToMinutesSeconds(seconds) {
+    if (isNaN(seconds) || seconds < 0) return "00:00";
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
+const playMusic = (trackIndex, pause = false) => {
+    currentIndex = trackIndex;
+    currentSong.src = `/${currFolder}/` + songs[trackIndex];
+    currentSong.loop = false;
+
+    // Play button icon update
+    if (play) {
+        if (!pause) {
+            currentSong.play();
+            play.src = "pause.svg";
+        } else {
+            currentSong.pause(); // Added pause logic here to prevent autoplay if pause=true
+            play.src = "play2.svg";
+        }
+    }
+
+    // Song Info aur Time shuru mein set karna
+    document.querySelector(".songinfo").innerHTML = decodeURI(songs[trackIndex].replace(".mp3", ""));
+    document.querySelector(".songtime").innerHTML = "00:00 / 00:00";
+
+    // Seekbar aur circle ko reset karna
+    if (circle) circle.style.left = "0%";
+
+    // Duration load hone par time update
+    currentSong.addEventListener('loadedmetadata', () => {
+        document.querySelector(".songtime").innerHTML = `00:00 / ${secondsToMinutesSeconds(currentSong.duration)}`;
+    });
+}
+
+// Load songs function (unchanged)
+async function getSongs(folder) {
+    currFolder = folder;
+    let a = await fetch(`/${folder}/`);
+    let response = await a.text();
+    let div = document.createElement("div");
+    div.innerHTML = response;
+    let as = div.getElementsByTagName("a");
+    songs = [];
+    for (let i = 0; i < as.length; i++) {
+        if (as[i].href.endsWith(".mp3")) {
+            songs.push(as[i].href.split(`/${folder}/`)[1]);
+        }
+    }
+
+    let songUL = document.querySelector(".songlist ul");
+    songUL.innerHTML = "";
+    for (const song of songs) {
+        const songTitle = decodeURIComponent(song.replace(".mp3", ""));
+        songUL.innerHTML += `<li>
+ <img class="invert" width="34" src="img/music.svg" alt="">
+ <div class="info"><div>${songTitle}</div><div>Aliash</div></div>
+ <div class="playnow"><span>Play Now</span><img class="invert" src="img/play.svg" alt=""></div>
+ </li>`;
+    }
+
+    Array.from(songUL.getElementsByTagName("li")).forEach((e, i) => {
+        e.addEventListener("click", () => {
+            playMusic(i);
+        });
+    });
+
+    // Re-apply search filter if user entered text
+    applySearchFilter();
+
+    document.querySelector(".left").style.left = "0";
+    return songs;
+}
+
+// Display albums (unchanged)
+async function displayAlbums() {
+    let a = await fetch(`/songs/`);
+    let response = await a.text();
+    let div = document.createElement("div");
+    div.innerHTML = response;
+    let anchors = div.getElementsByTagName("a");
+    let cardContainer = document.querySelector(".cardContainer");
+
+    for (const e of anchors) {
+        if (e.href.includes("/songs") && !e.href.includes(".htaccess")) {
+            let folder = e.href.split("/").slice(-2)[0];
+            try {
+                let res = await fetch(`/songs/${folder}/info.json`);
+                let meta = await res.json();
+                cardContainer.innerHTML += `<div data-folder="${folder}" class="card">
+ <div class="play"><svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+  <path d="M5 20V4L19 12L5 20Z" stroke="#141B34" fill="#000" stroke-width="1.5" stroke-linejoin="round"/>
+ </svg></div>
+ <img src="/songs/${folder}/cover.jpg" alt="">
+ <h2>${meta.title}</h2><p>${meta.description}</p>
+ </div>`;
+            } catch (err) { console.log(`No info.json for folder ${folder}`); }
+        }
+    }
+
+    Array.from(document.getElementsByClassName("card")).forEach(e => {
+        e.addEventListener("click", async item => {
+            songs = await getSongs(`songs/${item.currentTarget.dataset.folder}`);
+            if (songs.length > 0) playMusic(0);
+            document.querySelector(".left").style.left = "0";
+        });
+    });
+}
+
+// Main function
+async function main() {
+
+    // 🛠️ FIX: Re-initialize global DOM references inside main() after DOM is loaded
+    play = document.querySelector("#play");
+    previous = document.querySelector("#previous");
+    next = document.querySelector("#next");
+    // 🚩 Updated to target the correct ID in the Library section
+    libraryShuffleBtn = document.querySelector("#libraryShuffle");
+    seekbar = document.querySelector(".seekbar");
+    circle = document.querySelector(".circle");
+    const searchInput = document.querySelector('#searchInput');
+    const themeToggle = document.querySelector('#themeToggle');
+
+    // Initialize theme from localStorage
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'light') setTheme(true);
+    if (themeToggle) themeToggle.textContent = document.body.classList.contains('light') ? '🌞' : '🌗';
+
+    if (searchInput) {
+        searchInput.addEventListener('input', () => applySearchFilter());
+        // If user presses Enter in search, focus first visible song
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const first = document.querySelector('.songlist ul li:not([style*="display: none"])');
+                if (first) first.click();
+            }
+        });
+    }
+
+    if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+            const isLight = !document.body.classList.contains('light');
+            setTheme(isLight);
+            themeToggle.textContent = isLight ? '🌞' : '🌗';
+        });
+    }
+
+    await getSongs("songs/ncs");
+    if (songs.length > 0) playMusic(0, true);
+    await displayAlbums();
+
+    // Play/pause
+    if (play) {
+        play.addEventListener("click", () => {
+            if (currentSong.paused) { currentSong.play(); play.src = "pause.svg"; }
+            else { currentSong.pause(); play.src = "play2.svg"; }
+        });
+    }
+
+    // Keyboard: space toggles play/pause when not typing in input
+    document.addEventListener('keydown', (e) => {
+        const active = document.activeElement;
+        if (e.code === 'Space' && active && (active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA')) {
+            e.preventDefault();
+            if (currentSong.paused) { currentSong.play(); if (play) play.src = 'pause.svg'; }
+            else { currentSong.pause(); if (play) play.src = 'play2.svg'; }
+        }
+    });
+
+    // Prev/Next buttons
+    if (previous) {
+        previous.addEventListener("click", () => {
+            currentIndex = (currentIndex - 1 + songs.length) % songs.length;
+            playMusic(currentIndex);
+        });
+    }
+    if (next) {
+        next.addEventListener("click", () => {
+            currentIndex = (currentIndex + 1) % songs.length;
+            playMusic(currentIndex);
+        });
+    }
+
+    // 🔁 Library Shuffle Toggle Logic (ID: libraryShuffle)
+    if (libraryShuffleBtn) {
+        libraryShuffleBtn.addEventListener("click", () => {
+            isShuffle = !isShuffle;
+            // ✅ Alert added as requested
+            alert(isShuffle ? "Shuffle is ON 🔀" : "Shuffle is OFF ⏩");
+
+            // Highlight the button when ON (agar aapne CSS mein effect diya hai)
+            libraryShuffleBtn.style.opacity = isShuffle ? "1" : "0.5";
+
+            // Agar aapko Library list ko bhi shuffle karna hai, toh is function ko call karein:
+            // getSongs(currFolder); 
+        });
+    }
+
+    // Circular autoplay and Shuffle Logic (unchanged - it uses the isShuffle variable)
+    currentSong.addEventListener("ended", () => {
+        if (isShuffle) {
+            // Random index for shuffle
+            let newIndex;
+            do {
+                newIndex = Math.floor(Math.random() * songs.length);
+            } while (newIndex === currentIndex && songs.length > 1); // Ensure it's not the same song if possible
+            currentIndex = newIndex;
+        } else {
+            // Sequential play
+            currentIndex = (currentIndex + 1) % songs.length;
+        }
+        playMusic(currentIndex);
+    });
+
+    // Seekbar and Time logic (unchanged)
+    if (circle && seekbar) {
+
+        circle.addEventListener("mousedown", (e) => {
+            e.preventDefault(); // Zaroori hai taaki text selection na ho dragging ke dauran
+            isDragging = true;
+        });
+        document.addEventListener("mouseup", () => isDragging = false);
+
+        document.addEventListener("mousemove", e => {
+            if (!isDragging || !currentSong.duration) return;
+            const rect = seekbar.getBoundingClientRect();
+            let newPositionX = e.clientX - rect.left;
+            let percent = Math.min(Math.max(newPositionX, 0), rect.width) / rect.width;
+
+            circle.style.left = percent * 100 + "%";
+            currentSong.currentTime = percent * currentSong.duration;
+        });
+
+        seekbar.addEventListener("click", e => {
+            if (!currentSong.duration) return;
+            const percent = e.offsetX / seekbar.offsetWidth;
+            currentSong.currentTime = percent * currentSong.duration;
+            circle.style.left = percent * 100 + "%";
+        });
+    }
+
+    currentSong.addEventListener("timeupdate", () => {
+        if (currentSong.duration) {
+            const progressPercent = (currentSong.currentTime / currentSong.duration) * 100;
+
+            if (!isDragging && circle) {
+                circle.style.left = progressPercent + "%";
+            }
+
+            document.querySelector(".songtime").innerHTML =
+                `${secondsToMinutesSeconds(currentSong.currentTime)} / ${secondsToMinutesSeconds(currentSong.duration)}`;
+        } else {
+            document.querySelector(".songtime").innerHTML = "00:00 / 00:00";
+        }
+    });
+
+    // Sidebar toggle (unchanged)
+    document.querySelector(".hamburgerContainer").addEventListener("click", () => document.querySelector(".left").style.left = "0");
+    document.querySelector(".close").addEventListener("click", () => document.querySelector(".left").style.left = "-120%");
+
+    // Volume control (unchanged)
+    const volumeImg = document.querySelector(".volume>img");
+    const volumeRange = document.querySelector(".range input");
+
+    if (volumeRange && currentSong) { // Check for volumeRange before adding event listener
+        volumeRange.addEventListener("input", e => {
+            currentSong.volume = parseInt(e.target.value) / 100;
+            if (currentSong.volume > 0) volumeImg.src = volumeImg.src.replace("mute.svg", "volume.svg");
+            else volumeImg.src = volumeImg.src.replace("volume.svg", "mute.svg");
+        });
+    }
+
+    if (volumeImg && currentSong) { // Check for volumeImg before adding event listener
+        volumeImg.addEventListener("click", e => {
+            if (e.target.src.includes("volume.svg")) {
+                e.target.src = e.target.src.replace("volume.svg", "mute.svg");
+                currentSong.volume = 0;
+                if (volumeRange) volumeRange.value = 0;
+            } else {
+                e.target.src = e.target.src.replace("mute.svg", "volume.svg");
+                currentSong.volume = 0.10;
+                if (volumeRange) volumeRange.value = 10;
+            }
+        });
+    }
+}
+
+main();
